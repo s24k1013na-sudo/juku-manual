@@ -24,7 +24,6 @@ if not check_password():
 # ---------------------------------------------------------
 try:
     # Geminiの準備
-    # クライアント作成の書き方を最新版に固定
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
     
     # Supabaseの準備
@@ -45,7 +44,7 @@ with tab1:
     st.title("🤖 塾バイト・マニュアルAI")
     
     try:
-        # テーブル名を manual に変更（sなし）
+        # テーブル名を manual に固定
         response = supabase.table("manual").select("*").execute()
         db_data = response.data
         manual_items = [f"・{item['keyword']}: {item['content']}" for item in db_data]
@@ -72,9 +71,9 @@ with tab1:
             response_placeholder = st.empty()
             full_response = ""
             
-            # モデル名を 1.5-flash にして安定性を向上
+            # モデル名を最新の 2.0-flash に修正
             res = client.models.generate_content_stream(
-                model='gemini-1.5-flash',
+                model='gemini-2.0-flash',
                 contents=user_input,
                 config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
             )
@@ -96,7 +95,6 @@ with tab2:
         if submit_button:
             if new_keyword and new_content:
                 try:
-                    # ここも manual に修正
                     supabase.table("manual").insert({"keyword": new_keyword, "content": new_content}).execute()
                     st.success(f"🎉 「{new_keyword}」を登録しました！")
                     st.rerun()
