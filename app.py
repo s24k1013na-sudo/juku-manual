@@ -24,6 +24,7 @@ if not check_password():
 # ---------------------------------------------------------
 try:
     # Geminiの準備
+    # クライアント作成の書き方を最新版に固定
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
     
     # Supabaseの準備
@@ -35,7 +36,7 @@ except Exception as e:
     st.stop()
 
 # ---------------------------------------------------------
-# 3. 画面のタブ切り替え（チャット / マニュアル追加）
+# 3. 画面のタブ切り替え
 # ---------------------------------------------------------
 tab1, tab2 = st.tabs(["💬 AIチャット", "📝 マニュアル追加・一覧"])
 
@@ -43,21 +44,18 @@ tab1, tab2 = st.tabs(["💬 AIチャット", "📝 マニュアル追加・一�
 with tab1:
     st.title("🤖 塾バイト・マニュアルAI")
     
-    # データベースから最新のマニュアルをすべて取得
     try:
-        response = supabase.table("manuals").select("*").execute()
+        # テーブル名を manual に変更（sなし）
+        response = supabase.table("manual").select("*").execute()
         db_data = response.data
-        
-        # 取得したデータをAI用のテキストに整形
         manual_items = [f"・{item['keyword']}: {item['content']}" for item in db_data]
         MANUAL_TEXT = "\n".join(manual_items) if manual_items else "現在マニュアルは登録されていません。"
     except Exception as e:
-        st.error(f"データベースからのデータ取得に失敗しました: {e}")
+        st.error(f"データベース連携エラー: {e}")
         st.stop()
 
     SYSTEM_INSTRUCTION = f"あなたは塾の先輩です。以下のマニュアルに基づき回答してください。\n【塾のマニュアル】\n{MANUAL_TEXT}"
 
-    # チャット履歴管理
     if "messages" not in st.session_state:
         st.session_state.messages = [{"role": "assistant", "content": "お疲れ様です！何か分からないことがあれば聞いてくださいね。"}]
 
@@ -65,7 +63,7 @@ with tab1:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    if user_input := st.chat_input("質問を入力...（例：ゴミ出しについて）"):
+    if user_input := st.chat_input("質問を入力..."):
         with st.chat_message("user"):
             st.write(user_input)
         st.session_state.messages.append({"role": "user", "content": user_input})
@@ -74,8 +72,9 @@ with tab1:
             response_placeholder = st.empty()
             full_response = ""
             
+            # モデル名を 1.5-flash にして安定性を向上
             res = client.models.generate_content_stream(
-                model='gemini-2.0-flash',
+                model='gemini-1.5-flash',
                 contents=user_input,
                 config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
             )
@@ -89,29 +88,17 @@ with tab1:
 # --- タブ2: マニュアル追加・一覧画面 ---
 with tab2:
     st.header("📝 新しいマニュアルの追加")
-    
-    # 入力フォーム
     with st.form("add_manual_form", clear_on_submit=True):
-        new_keyword = st.text_input("キーワード（例：補講の申請、鍵の閉め方）")
-        new_content = st.text_area("説明文（マニュアルの詳細内容）")
+        new_keyword = st.text_input("キーワード（例：ゴミ出し、補講）")
+        new_content = st.text_area("説明文")
         submit_button = st.form_submit_button("データベースに登録")
         
         if submit_button:
             if new_keyword and new_content:
-                # Supabaseにデータを挿入
                 try:
-                    supabase.table("manuals").insert({"keyword": new_keyword, "content": new_content}).execute()
-                    st.success(f"🎉 「{new_keyword}」をマニュアルに登録しました！チャットで質問できるようになります。")
+                    # ここも manual に修正
+                    supabase.table("manual").insert({"keyword": new_keyword, "content": new_content}).execute()
+                    st.success(f"🎉 「{new_keyword}」を登録しました！")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"登録エラー: {e}")
-            else:
-                st.warning("キーワードと説明文の両方を入力してください。")
-                
-    st.write("---")
-    st.header("📋 現在登録されているマニュアル一覧")
-    if db_data:
-        for item in db_data:
-            with st.expander(f"📌 {item['keyword']}"):
-                st.write(item["content"])
-    else:
-        st.info("登録されているマニュアルはまだありません。")
