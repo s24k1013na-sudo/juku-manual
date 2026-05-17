@@ -71,9 +71,9 @@ with tab1:
             response_placeholder = st.empty()
             full_response = ""
             
-            # モデル名を最新の 2.0-flash に修正
+            # クォータ（無料枠）制限を回避しやすくするため 1.5-flash を使用
             res = client.models.generate_content_stream(
-                model='gemini-2.0-flash',
+                model='gemini-1.5-flash',
                 contents=user_input,
                 config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
             )
