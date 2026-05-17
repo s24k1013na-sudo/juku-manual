@@ -5,13 +5,9 @@ from supabase import create_client, Client
 # --- 1. セキュリティ設定 ---
 def check_password():
     if "password_correct" not in st.session_state:
-        st.text_input("塾の合言葉を入力してください", type="password", on_change=lambda: st.session_state.update({"password_correct": st.session_state["password"] == st.secrets["APP_PASSWORD"]}), key="password")
+        st.text_input("塾の合言葉", type="password", on_change=lambda: st.session_state.update({"password_correct": st.session_state["password"] == st.secrets["APP_PASSWORD"]}), key="password")
         return False
-    elif not st.session_state["password_correct"]:
-        st.text_input("合言葉が違います。", type="password", on_change=lambda: st.session_state.update({"password_correct": st.session_state["password"] == st.secrets["APP_PASSWORD"]}), key="password")
-        st.error("😕 パスワードが正しくありません")
-        return False
-    return True
+    return st.session_state.get("password_correct", False)
 
 if not check_password():
     st.stop()
@@ -24,19 +20,42 @@ except Exception as e:
     st.error(f"初期化エラー: {e}")
     st.stop()
 
+# --- 3. 【重要】利用可能なモデルを自動特定する関数 ---
+def get_available_model():
+    try:
+        # 使用可能なモデルをリストアップ
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # 1. 1.5-flash を探す
+        for m in models:
+            if 'gemini-1.5-flash' in m: return m
+        # 2. なければ 1.0-pro を探す
+        for m in models:
+            if 'gemini-pro' in m: return m
+        # 3. それでもなければ最初に見つかったものを使う
+        return models[0] if models else None
+    except Exception as e:
+        st.error(f"モデル一覧の取得に失敗しました: {e}")
+        return 'models/gemini-1.5-flash' # フォールバック
+
+# 適切なモデル名を決定
+target_model = get_available_model()
+
+# --- 4. チャット画面 ---
 tab1, tab2 = st.tabs(["💬 AIチャット", "📝 マニュアル管理"])
 
 with tab1:
     st.title("🤖 塾バイト・マニュアルAI")
-    
+    st.caption(f"使用中モデル: {target_model}") # デバッグ用
+
+    # マニュアル取得
     try:
         res = supabase.table("manual").select("*").execute()
-        manual_content = "\n".join([f"・{i['keyword']}: {i['content']}" for i in res.data]) if res.data else "マニュアルは未登録です。"
+        manual_text = "\n".join([f"・{i['keyword']}: {i['content']}" for i in res.data]) if res.data else "マニュアルなし"
     except:
-        manual_content = "マニュアル取得に失敗しました。"
+        manual_text = "マニュアル取得失敗"
 
-    # 【重要】通信エラーを避けるため、システム命令を普通のテキストとして定義
-    prompt_header = f"あなたは塾の先輩です。以下のマニュアルに従って回答してください。\n\n{manual_content}\n\n質問に対して、マニュアルに基づき回答を開始してください。\n"
+    # システム命令（古いバージョン対策で通常のプロンプトに結合する準備）
+    instruction = f"あなたは塾の先輩です。以下のマニュアルに基づき回答してください。\n{manual_text}\n\n"
 
     if "messages" not in st.session_state:
         st.session_state.messages = [{"role": "assistant", "content": "お疲れ様です！何かあれば聞いてください。"}]
@@ -54,14 +73,13 @@ with tab1:
             full_response = ""
             
             try:
-                # 通信エラー（404 v1beta）を避けるための最もシンプルな設定
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                # モデルの初期化（system_instructionを使わない安全な方法）
+                model = genai.GenerativeModel(model_name=target_model)
                 
-                # システム命令をユーザーの質問の直前に「合体」させて送る（これなら古いSDKでも動く）
-                combined_input = f"{prompt_header}\n\nユーザーの質問: {user_input}"
+                # 入力に命令を合体させる
+                combined_query = f"{instruction}ユーザーの質問: {user_input}"
                 
-                # 履歴を使わず、毎回マニュアルを含めて送る（確実性を優先）
-                response = model.generate_content(combined_input, stream=True)
+                response = model.generate_content(combined_query, stream=True)
                 
                 for chunk in response:
                     if chunk.text:
@@ -72,16 +90,16 @@ with tab1:
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
 
             except Exception as e:
-                st.error(f"AI応答エラーが発生しました。GoogleのAPIキーや設定を確認してください。\nエラー詳細: {e}")
+                st.error(f"エラー発生: {e}")
 
-# --- Tab2 のマニュアル追加処理 ---
+# --- 5. マニュアル追加（Tab2） ---
 with tab2:
     st.header("📝 マニュアルの追加")
-    with st.form("add_manual"):
+    with st.form("add_form"):
         k = st.text_input("キーワード")
         c = st.text_area("内容")
         if st.form_submit_button("登録"):
             if k and c:
                 supabase.table("manual").insert({"keyword": k, "content": c}).execute()
-                st.success("登録しました！")
+                st.success("登録完了！")
                 st.rerun()
